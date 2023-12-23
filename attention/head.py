@@ -53,7 +53,7 @@ class AttentionHead(nn.Module):
             where q = z * U_q, k = z * U_k and v = z * U_v
         """
         ## TODO analise possibility of batched learning in this forward
-        assert(len(z.shape) == 2) ## N x d_in
+        ## assert(len(z.shape) == 2) ## N x d_in
         q = self.query.forward(z) ## N x d_q
         k = self.key.forward(z) ## N x d_q
         v = self.value.forward(z) ## N x d_v
@@ -70,3 +70,59 @@ class AttentionHead(nn.Module):
             total += np.prod(list(tensor.shape), dtype=int)
 
         return total
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self,
+                 num_heads: int,
+                 input_dim: int,
+                 query_dim: int,
+                 head_dim: T.Optional[int] = None,
+                 encoding_dim: T.Optional[int] = None,
+                 init_policy = None):
+        """
+            @params:
+                num_heads (h): number of attention heads
+                input_dim (d): dimension of input sequence
+                query_dim (d_k): dimension of query and key vectors
+                head_dim (d_v): final dimension of output sequence of each attention head.
+                    Default: if None (no value provided), then defaults to d
+                encoding_dim (d_o): final dimension of module
+                    Default: if None (no value provided), then defaults to d, to preserve input sequence shape
+                init_policy: function to initialize modules. If None, defaults to random initialization with mean=0 and std=0.02
+                    Recommended: use functions from module torch.nn.init
+        """
+        super().__init__()
+        self.num_heads = num_heads
+        self.input_dim = input_dim
+        self.query_dim = query_dim
+        if head_dim is not None:
+            self.head_dim = head_dim
+        else:
+            self.head_dim = input_dim
+        if encoding_dim is not None:
+            self.encoding_dim = encoding_dim
+        else:
+            self.encoding_dim = input_dim
+
+        self.heads = [AttentionHead(input_dim=self.input_dim, 
+                                    query_dim=self.query_dim, 
+                                    encoding_dim=self.head_dim,
+                                    init_policy=init_policy) for _ in range(num_heads)]
+        self.combinator = nn.Linear(self.num_heads * self.head_dim, self.encoding_dim, bias=False)
+
+    def forward(self, z: torch.Tensor):
+        """
+            Implements MultiHeadAttention algorithm, given input sequence z of shape (N, d)
+
+            head_i = Attention(z) = softmax(q_i * k_i ^ T) * v_i
+                where q_i = z * U_{q, i}, k_i = z * U_{k, i} and v_i = z * U_{v, i}
+            output = Concat(head_1, ..., head_h) * U_o
+        """
+        ## assert len(z.shape) == 2
+        heads_outputs = [head(z) for head in self.heads]
+        return self.combinator(torch.concat(heads_outputs, dim=-1))
+
+    @property
+    def total_parameters(self):
+        combinator_parameters = np.prod(list(self.combinator.weight.shape), dtype=int)
+        return sum((head.total_parameters for head in self.heads)) + combinator_parameters
