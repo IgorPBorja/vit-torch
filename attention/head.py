@@ -5,7 +5,7 @@ import torch.nn as nn
 
 class AttentionHead(nn.Module):
     """
-        Single-headed attention module
+        AttentionHead: Single-headed attention module
     """
     def __init__(self, 
                  input_dim: int, 
@@ -71,14 +71,19 @@ class AttentionHead(nn.Module):
 
         return total
 
+
 class MultiHeadAttention(nn.Module):
+    """
+        MultiHeadAttention: multi-headed attention module (though with coupled search/retrieval operations)
+    """
+
     def __init__(self,
                  num_heads: int,
                  input_dim: int,
                  query_dim: int,
                  head_dim: T.Optional[int] = None,
                  encoding_dim: T.Optional[int] = None,
-                 init_policy = None):
+                 init_policy=None):
         """
             @params:
                 num_heads (h): number of attention heads
@@ -104,10 +109,12 @@ class MultiHeadAttention(nn.Module):
         else:
             self.encoding_dim = input_dim
 
-        self.heads = [AttentionHead(input_dim=self.input_dim, 
-                                    query_dim=self.query_dim, 
+        # NOTE: using nn.ModuleList makes pytorch include this in a recursive call
+        # when eventually calling to(device) on some model that has a MultiHeadAttention as a component
+        self.heads = nn.ModuleList([AttentionHead(input_dim=self.input_dim,
+                                    query_dim=self.query_dim,
                                     encoding_dim=self.head_dim,
-                                    init_policy=init_policy) for _ in range(num_heads)]
+                                    init_policy=init_policy) for _ in range(num_heads)])
         self.combinator = nn.Linear(self.num_heads * self.head_dim, self.encoding_dim, bias=False)
 
     def forward(self, z: torch.Tensor):
@@ -118,7 +125,7 @@ class MultiHeadAttention(nn.Module):
                 where q_i = z * U_{q, i}, k_i = z * U_{k, i} and v_i = z * U_{v, i}
             output = Concat(head_1, ..., head_h) * U_o
         """
-        ## assert len(z.shape) == 2
+        # assert len(z.shape) == 2
         heads_outputs = [head(z) for head in self.heads]
         return self.combinator(torch.concat(heads_outputs, dim=-1))
 
