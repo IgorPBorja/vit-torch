@@ -5,8 +5,7 @@ import torch.optim as optim
 from attention.vit import ViT
 import numpy as np
 from tqdm import tqdm
-
-#  import pytest
+import pytest
 
 img_shape = (3, 224, 224)
 num_classes = 10
