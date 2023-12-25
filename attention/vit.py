@@ -11,6 +11,8 @@ class Embedder(nn.Module):
     """
     Embedder module. Generates the linear projection/embedding for the image patches, as well
     as the class embedding (scalar -> vector) and the positional embeddings.
+
+    In a batched learning scenario, it will generate a 3D-tensor of shape (batch size, number of tokens, embedding dimension). In this case, number of tokens is number of patches + 1 (one accounting for the class embedding). Each slice accross dimension 0 of this tensor is the sequence of embeddings corresponding to one full image.
     """
 
     def __init__(
@@ -48,15 +50,25 @@ class Embedder(nn.Module):
             + get_params(self.Epos.bias)
         )
 
-    def forward(self, x: torch.Tensor, label: T.Union[int, float]) -> torch.Tensor:
-        x_class = self.Eclass(
-            torch.tensor(label, dtype=torch.float32, device=x.device).reshape(1, 1)  # (1, D) on same device as image
-        )  # TODO is this the best way of treating labels?
-        x_pos = self.Epos(torch.arange(0, self.N + 1, dtype=torch.float32, device=x.device))  # (N + 1 * D) on same device as image
-        x_pos = x_pos.reshape(self.N + 1, self.encoding_dim)  # (N + 1, D)
-        x_patches = self.patcher.patch(x).to(x.device)  # (N, C * h_p * w_p) on same device as image
+    def forward(self, x: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
+        if len(label.shape) > 0:  # batched training
+            x_class = self.Eclass(torch.unsqueeze(label, dim=-1))  # (B, 1) x (1, D) -> (B, D)
+            x_patches = self.patcher.patch(x).to(x.device)  # (B, N, C * h_p * w_p) on same device as image
+            batch_size = label.shape[0]
+        else:  # unbatched training
+            x_class = self.Eclass(torch.unsqueeze(label, dim=0)).unsqueeze(dim=0)  # (1, D)
+            x_patches = self.patcher.patch(x).to(x.device).unsqueeze(dim=0)  # (1, N, C * h_p * w_p) on same device as image
+            batch_size = 1
 
-        return torch.concat([x_class, self.E(x_patches)]) + x_pos  # ((N + 1), D)
+        x_class = torch.unsqueeze(x_class, dim=-2)  # (B, 1, D), ready for concat now
+        raw_positional_info = torch.arange(0, self.N + 1, dtype=torch.float32, device=x.device)  # (N + 1,)
+        x_pos = self.Epos(raw_positional_info).repeat(batch_size, 1)  # (B, N + 1 * D) on same device as image
+        x_pos = x_pos.reshape(batch_size, self.N + 1, self.encoding_dim)  # (B, N + 1, D)
+        # this patch function will deal just fine with batched images, see implementation
+        patch_embeddings = self.E(x_patches)  # (B, N, D)
+
+        batched_final_embeddings = torch.concat([x_class, patch_embeddings], dim=-2) + x_pos  # (B, (N + 1), D)
+        return batched_final_embeddings
 
 
 class ViTBlock(nn.Module):
@@ -119,7 +131,8 @@ class ViTBlock(nn.Module):
         Returns the total number of learnable parameters (weights).
         Assumes the non-linearity is a fixed function and does not have learnable parameters of its own.
         """
-        def get_params(tensor): return np.prod(list(tensor.shape), dtype=int)
+        def get_params(tensor):
+            return np.prod(list(tensor.shape), dtype=int)
         total = self.multihead_att.total_parameters
         for layer in self.mlp:
             if isinstance(layer, nn.Linear):
@@ -187,7 +200,8 @@ class ViT(nn.Module):
 
     @property
     def total_parameters(self) -> int:
-        def get_params(tensor): return np.prod(list(tensor.shape), dtype=int)
+        def get_params(tensor):
+            return np.prod(list(tensor.shape), dtype=int)
         return (
             self.square_patch_embedder.total_parameters
             + sum([t.total_parameters for t in self.transformer_blocks])
@@ -210,4 +224,4 @@ class ViT(nn.Module):
         z0 = self.square_patch_embedder(x, label)
         for t in self.transformer_blocks:
             z0 = t(z0)
-        return self.layernorm(z0[0, :])
+        return self.layernorm(torch.select(z0, dim=-2, index=0))  # (..., N, D) -> (..., D), taking first D-vector

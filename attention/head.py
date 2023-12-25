@@ -3,15 +3,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+
 class AttentionHead(nn.Module):
     """
         AttentionHead: Single-headed attention module
     """
-    def __init__(self, 
-                 input_dim: int, 
-                 query_dim: int, 
+
+    def __init__(self,
+                 input_dim: int,
+                 query_dim: int,
                  encoding_dim: T.Optional[int] = None,
-                 init_policy = None):
+                 init_policy=None):
         """
             @params:
                 input_dim (d): dimension of input sequence
@@ -37,26 +39,25 @@ class AttentionHead(nn.Module):
                 init_policy(self.query.weight)
                 init_policy(self.key.weight)
                 init_policy(self.value.weight)
-            ## raise NotImplementedError("Custom iniatialization policy not yet implemented")
+            # raise NotImplementedError("Custom iniatialization policy not yet implemented")
         else:
-            ## by default all functions on nn.init execute under no_grad
-            ## https://pytorch.org/docs/stable/nn.init.html
+            # by default all functions on nn.init execute under no_grad
+            # https://pytorch.org/docs/stable/nn.init.html
             nn.init.normal_(self.query.weight, mean=0.0, std=0.02)
             nn.init.normal_(self.key.weight, mean=0.0, std=0.02)
             nn.init.normal_(self.value.weight, mean=0.0, std=0.02)
 
-    def forward(self, z : torch.Tensor):
+    def forward(self, z: torch.Tensor):
         """
             Implements scaled attention algorithm
 
             output = softmax(qk^T / sqrt(d_query)) * v
             where q = z * U_q, k = z * U_k and v = z * U_v
         """
-        ## TODO analise possibility of batched learning in this forward
-        ## assert(len(z.shape) == 2) ## N x d_in
-        q = self.query.forward(z) ## N x d_q
-        k = self.key.forward(z) ## N x d_q
-        v = self.value.forward(z) ## N x d_v
+        # assert(len(z.shape) == 2) ## N x d_in
+        q = self.query.forward(z)  # N x d_q
+        k = self.key.forward(z)  # N x d_q
+        v = self.value.forward(z)  # N x d_v
         scaled_query = torch.softmax(q @ k.transpose(-2, -1), dim=-1) * (self.query_dim) ** (- 0.5)
         return scaled_query @ v
 
