@@ -52,7 +52,12 @@ class Embedder(nn.Module):
 
     def forward(self, x: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         if len(label.shape) > 0:  # batched training
-            x_class = self.Eclass(torch.unsqueeze(label, dim=-1))  # (B, 1) x (1, D) -> (B, D)
+            if len(label.shape) == 1:  # (B,)
+                x_class = self.Eclass(torch.unsqueeze(label, dim=-1))  # (B, 1) x (1, D) -> (B, D)
+            elif len(label.shape) == 2 and label.shape[1] == 1:  # (B, 1)
+                x_class = self.Eclass(label)
+            else:
+                raise ValueError("Invalid label format: must be either 0D tensor (unbatched learning), 1D tensor of shape (batch_size,), or 2D tensor of shape (batch_size, 1)")
             x_patches = self.patcher.patch(x).to(x.device)  # (B, N, C * h_p * w_p) on same device as image
             batch_size = label.shape[0]
         else:  # unbatched training
@@ -78,6 +83,20 @@ class ViTBlock(nn.Module):
         Multiheaded self-attention module (where encoding dimension is always the same as input dimension, for the residual connections to work)
         Layernorm
         MLP with GELU non-linearity (as default, but non-linearity can be changed)
+
+        @params:
+            num_heads [int]: number of attention heads in each MultiHeadAttention block
+                NOTE: is also the final output dimension of MultiHeadAttention (after applying combinator/final linear layer)
+                This is so each block preserves shape
+            input_dim [int]: length of input vector/token in each attention block
+            query_dim [int]: dimension of query/key in attention block
+            head_dim [int]: output dimension of each attention head
+            mlp_layers [int]: size of each linear layer of the mlp
+                We must have mlp_layers[-1] == input_dim
+            non_linearity [nn.Module]: a class that inherits from nn.Module. Represents the activation function in the MLP
+                Default: nn.GELU
+            init_policy [callable]: a function to use for weight initialization.
+                Default: sampling from Gaussian distribution with mean=0 and std=0.02
     """
 
     def __init__(
@@ -87,7 +106,7 @@ class ViTBlock(nn.Module):
         query_dim: int,
         head_dim: int,
         mlp_layers: T.List[int],
-        non_linearity: nn.Module = nn.GELU(),  # must be a module
+        non_linearity: nn.Module = nn.GELU,  # must be a module
         init_policy=None,
     ):
         super().__init__()
@@ -116,7 +135,7 @@ class ViTBlock(nn.Module):
                 torch.nn.init.normal_(linear_layer.weight, mean=0.0, std=0.02)
                 torch.nn.init.normal_(linear_layer.bias, mean=0.0, std=0.02)
             self.mlp.append(linear_layer)
-            self.mlp.append(non_linearity)
+            self.mlp.append(non_linearity())
             current_dim = layer_size
         self.output_dim = current_dim
 
@@ -155,6 +174,24 @@ class ViT(nn.Module):
     Customizable ViT (Visual Transformer) encoder (sequence-to-sequence).
 
     Structure follows closely paper "An image is worth 16 x 16 words: transformers for image recognition at scale", from https://arxiv.org/abs/2010.11929
+
+        @params:
+            img_shape [tuple[int, int, int]]: shape of input image
+            patch_size [int]: size of the patch size
+                Each patch will be a (num_channels x patch_size x patch_size) slice of the input image
+            num_blocks [int]: number of transformer (ViT) blocks
+            num_heads [int]: number of attention heads in each MultiHeadAttention block
+                NOTE: is also the final output dimension of MultiHeadAttention (after applying combinator/final linear layer)
+                This is so each block preserves shape
+            input_dim [int]: length of input vector/token in each attention block
+            query_dim [int]: dimension of query/key in attention block
+            head_dim [int]: output dimension of each attention head
+            mlp_layers [int]: size of each linear layer of the mlp
+                We must have mlp_layers[-1] == input_dim
+            non_linearity [nn.Module]: a class that inherits from nn.Module. Represents the activation function in the MLP
+                Default: nn.GELU
+            init_policy [callable]: a function to use for weight initialization.
+                Default: sampling from Gaussian distribution with mean=0 and std=0.02
     """
 
     def __init__(
@@ -167,7 +204,7 @@ class ViT(nn.Module):
         query_dim: int,
         head_dim: int,
         mlp_layers: T.List[int],
-        non_linearity: nn.Module = nn.GELU(),  # must be a module
+        non_linearity: nn.Module = nn.GELU,  # must be a module
         init_policy=None,
     ):
         super().__init__()
