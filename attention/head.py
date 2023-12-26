@@ -58,7 +58,7 @@ class AttentionHead(nn.Module):
         q = self.query.forward(z)  # N x d_q
         k = self.key.forward(z)  # N x d_q
         v = self.value.forward(z)  # N x d_v
-        scaled_query = torch.softmax(q @ k.transpose(-2, -1), dim=-1) * (self.query_dim) ** (- 0.5)
+        scaled_query = torch.softmax((q @ k.transpose(-2, -1)) * (self.query_dim) ** (- 0.5), dim=-1)
         return scaled_query @ v
 
     @property
