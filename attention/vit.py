@@ -97,6 +97,9 @@ class ViTBlock(nn.Module):
                 Default: nn.GELU
             init_policy [callable]: a function to use for weight initialization.
                 Default: sampling from Gaussian distribution with mean=0 and std=0.02
+
+        @keyword arguments
+            non_linearity_params [dict]: params to be passed to initialize instance of activation function
     """
 
     def __init__(
@@ -108,6 +111,8 @@ class ViTBlock(nn.Module):
         mlp_layers: T.List[int],
         non_linearity: nn.Module = nn.GELU,  # must be a module
         init_policy=None,
+        *,
+        non_linearity_params: dict = {}
     ):
         super().__init__()
         if len(mlp_layers) == 0:
@@ -135,7 +140,7 @@ class ViTBlock(nn.Module):
                 torch.nn.init.normal_(linear_layer.weight, mean=0.0, std=0.02)
                 torch.nn.init.normal_(linear_layer.bias, mean=0.0, std=0.02)
             self.mlp.append(linear_layer)
-            self.mlp.append(non_linearity())
+            self.mlp.append(non_linearity(**non_linearity_params))
             current_dim = layer_size
         self.output_dim = current_dim
 
@@ -161,7 +166,17 @@ class ViTBlock(nn.Module):
         return total
 
     def forward(self, z: torch.Tensor) -> torch.Tensor:
-        z_prime = z + self.layernorm1(self.multihead_att(z))
+        """
+            Implements ViT block algorithm (with residual connections):
+
+                z_{i + 1}' = z_i + MultiHeadAttention(LayerNorm(z_i))
+                z_{i + 1} = z_{i + 1}' + MLP(LayerNorm(z_{i + 1}'))
+
+            @params:
+                z: input sequence, expected shape (..., N, D), where N is the number of tokens and D is the embedding dimension
+        """
+        norm_z = self.layernorm1(z)
+        z_prime = z + self.multihead_att(norm_z)
         mlp_output = self.layernorm2(z_prime)
         for layer in self.mlp:
             mlp_output = layer(mlp_output)
@@ -192,6 +207,9 @@ class ViT(nn.Module):
                 Default: nn.GELU
             init_policy [callable]: a function to use for weight initialization.
                 Default: sampling from Gaussian distribution with mean=0 and std=0.02
+
+        @keyword arguments
+            non_linearity_params [dict]: params to be passed to initialize instance of activation function
     """
 
     def __init__(
@@ -206,6 +224,8 @@ class ViT(nn.Module):
         mlp_layers: T.List[int],
         non_linearity: nn.Module = nn.GELU,  # must be a module
         init_policy=None,
+        *,
+        non_linearity_params: dict = {}
     ):
         super().__init__()
         if len(img_shape) != 3:
@@ -229,6 +249,7 @@ class ViT(nn.Module):
                     mlp_layers=mlp_layers,
                     non_linearity=non_linearity,
                     init_policy=init_policy,
+                    non_linearity_params=non_linearity_params
                 )
                 for _ in range(num_blocks)
             ]
