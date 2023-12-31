@@ -39,7 +39,6 @@ class AttentionHead(nn.Module):
                 init_policy(self.query.weight)
                 init_policy(self.key.weight)
                 init_policy(self.value.weight)
-            # raise NotImplementedError("Custom iniatialization policy not yet implemented")
         else:
             # by default all functions on nn.init execute under no_grad
             # https://pytorch.org/docs/stable/nn.init.html
@@ -53,12 +52,19 @@ class AttentionHead(nn.Module):
 
             output = softmax(qk^T / sqrt(d_query)) * v
             where q = z * U_q, k = z * U_k and v = z * U_v
+
+            shapes:
+            -- input dimension: (..., N, d_in)
+            -- q, k: (..., N, d_q)
+            -- v: (..., N, d_v)
+            Applying softmax(qk^T / sqrt(d_query) * v): 
+            -- output dimension: (..., N, d_v)
         """
         # assert(len(z.shape) == 2) ## N x d_in
         q = self.query.forward(z)  # N x d_q
         k = self.key.forward(z)  # N x d_q
         v = self.value.forward(z)  # N x d_v
-        scaled_query = torch.softmax((q @ k.transpose(-2, -1)) * (self.query_dim) ** (- 0.5), dim=-1)
+        scaled_query = torch.softmax((q @ k.transpose(-2, -1)) * ((self.query_dim) ** (- 0.5)), dim=-1)
         return scaled_query @ v
 
     @property
