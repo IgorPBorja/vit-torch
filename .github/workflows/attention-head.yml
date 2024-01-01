@@ -1,0 +1,45 @@
+name: Unit-tests for ViT components (Attention modules and image patches generator)
+on: [push]
+
+jobs:
+  test-vit-components:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'  # Replace with your Python version if needed
+
+      - name: Install dependencies on testing environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests on PatchGenerator (shape tests and verify that data is in the correct order)
+        run: pytest tests/patches.py
+
+      - name: Run unit tests on AttentionHead module (shape and convergence tests).
+        run: pytest -s tests/attention_block.py
+  test-vit-complete:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Set up Python
+        uses: actions/setup-python@v2
+        with:
+          python-version: '3.10'  # Replace with your Python version if needed
+
+      - name: Install dependencies on testing environment
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run unit tests ViT encoder - assert that output shapes match, parameter counts match and model converges. Tests both a weak version (loss decreases) and a stronger one (loss decreases by some factor)
+        run: pytest -s tests/vit.py
