@@ -4,7 +4,6 @@ import torch.nn as nn
 import numpy as np
 from attention.head import MultiHeadAttention
 from attention.patch import PatchGenerator
-import copy
 
 
 class Embedder(nn.Module):
@@ -88,11 +87,12 @@ class ViTBlock(nn.Module):
             num_heads [int]: number of attention heads in each MultiHeadAttention block
                 NOTE: is also the final output dimension of MultiHeadAttention (after applying combinator/final linear layer)
                 This is so each block preserves shape
-            input_dim [int]: length of input vector/token in each attention block
+            embedding_dim [int]: length of input vector/token in each attention block
+                Is both the input and output dimension of the tokens in the module. The ViT block is shape preserving
             query_dim [int]: dimension of query/key in attention block
             head_dim [int]: output dimension of each attention head
             mlp_layers [int]: size of each linear layer of the mlp
-                We must have mlp_layers[-1] == input_dim
+                We must have mlp_layers[-1] == embedding_dim
             non_linearity [nn.Module]: a class that inherits from nn.Module. Represents the activation function in the MLP
                 Default: nn.GELU
             init_policy [callable]: a function to use for weight initialization.
@@ -105,7 +105,7 @@ class ViTBlock(nn.Module):
     def __init__(
         self,
         num_heads: int,
-        input_dim: int,
+        embedding_dim: int,
         query_dim: int,
         head_dim: int,
         mlp_layers: T.List[int],
@@ -117,19 +117,19 @@ class ViTBlock(nn.Module):
         super().__init__()
         if len(mlp_layers) == 0:
             raise ValueError("No linear/fully-connected layer on ViT block")
-        elif mlp_layers[-1] != input_dim:
+        elif mlp_layers[-1] != embedding_dim:
             raise ValueError(
                 "Output dimension of MLP does not match output dimension of attention block. This is not possible, because of the existence of a residual connection between the end of the attention block and the end of the MLP."
             )
         self.multihead_att = MultiHeadAttention(
             num_heads=num_heads,
-            input_dim=input_dim,
+            input_dim=embedding_dim,
             query_dim=query_dim,
             head_dim=head_dim,
-            encoding_dim=input_dim,
+            encoding_dim=embedding_dim,
             init_policy=init_policy,
         )
-        current_dim = input_dim
+        current_dim = embedding_dim
         self.mlp = nn.ModuleList()
         for layer_size in mlp_layers:
             linear_layer = nn.Linear(current_dim, layer_size)
@@ -144,9 +144,9 @@ class ViTBlock(nn.Module):
             current_dim = layer_size
         self.output_dim = current_dim
 
-        self.layernorm1 = nn.LayerNorm(input_dim)  # just before attention block
+        self.layernorm1 = nn.LayerNorm(embedding_dim)  # just before attention block
         self.layernorm2 = nn.LayerNorm(
-            input_dim
+            embedding_dim
         )  # just after attention block and before MLP
 
     @property
@@ -173,7 +173,9 @@ class ViTBlock(nn.Module):
                 z_{i + 1} = z_{i + 1}' + MLP(LayerNorm(z_{i + 1}'))
 
             @params:
-                z: input sequence, expected shape (..., N, D), where N is the number of tokens and D is the embedding dimension
+                z_i: input sequence, expected shape (..., N, D), where N is the number of tokens and D is the embedding dimension
+            @returns:
+                z_{i+1}: output sequence, shape (..., N, D)
         """
         norm_z = self.layernorm1(z)
         z_prime = z + self.multihead_att(norm_z)
@@ -197,8 +199,9 @@ class ViT(nn.Module):
             num_blocks [int]: number of transformer (ViT) blocks
             num_heads [int]: number of attention heads in each MultiHeadAttention block
                 NOTE: is also the final output dimension of MultiHeadAttention (after applying combinator/final linear layer)
-                This is so each block preserves shape
-            input_dim [int]: length of input vector/token in each attention block
+                This is so each block preserves shape.
+            embedding_dim [int]: length of input vector/token in each attention block
+                The output dimension of a pair img=(..., C, H, W) and label=(..., C) (or (..., C, 1)) is (..., D), where D is the embedding_dim parameter
             query_dim [int]: dimension of query/key in attention block
             head_dim [int]: output dimension of each attention head
             mlp_layers [int]: size of each linear layer of the mlp
@@ -243,7 +246,7 @@ class ViT(nn.Module):
             [
                 ViTBlock(
                     num_heads=num_heads,
-                    input_dim=embedding_dim,
+                    embedding_dim=embedding_dim,
                     query_dim=query_dim,
                     head_dim=head_dim,
                     mlp_layers=mlp_layers,
@@ -267,7 +270,7 @@ class ViT(nn.Module):
             + get_params(self.layernorm.bias)
         )
 
-    def forward(self, x: torch.Tensor, label: T.Union[int, float]) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, label: torch.Tensor) -> torch.Tensor:
         """
         Implements ViT algorithm:
 
@@ -278,6 +281,12 @@ class ViT(nn.Module):
         for i=1...l
             z_i = ViTBlock_i(z_{i - 1}) ---> of shape ((N + 1) X D), since each ViT block is shape preserving
         and the final result is y = layernorm(z_l^0), an R^D vector obtained taking the first row of the final sequence and normalizing it
+
+        @params:
+            x [torch.Tensor]: input image, of shape (..., C, H, W)
+            label [int]: label of the image, shape (..., C) or (..., C, 1)
+        @returns:
+            y [torch.Tensor]: output embedding, of shape (..., D)
         """
         z0 = self.square_patch_embedder(x, label)
         for t in self.transformer_blocks:
