@@ -1,5 +1,5 @@
 name: Unit-tests for ViT components (Attention modules and image patches generator)
-on: [push]
+on: [pull_request]
 
 jobs:
   test-vit-components:
